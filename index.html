@@ -428,57 +428,82 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 // === DATA ===
 const STORAGE_KEY = 'tfxp_trades';
 
-// === SUPABASE (async load — app works without it) ===
+// === SUPABASE (direct fetch — no CDN needed) ===
 const SUPABASE_URL = 'https://omxgtrsmpgvmqccmpadr.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9teGd0cnNtcGd2bXFjY21wYWRyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1OTU4MzEsImV4cCI6MjA5NTE3MTgzMX0.KywsA4Rcx-6tB9Tb1VShPCEcmIRnk10GwqiHLJkZ_cI';
 
-let supabase = null;
+const SESSION_KEY = 'tfxp_session';
 let supabaseUser = null;
+let supabaseToken = null;
 
-function initSupabase() {
-  if (typeof window.supabase === 'undefined' || !window.supabase.createClient) {
-    console.warn('Supabase SDK not loaded — run local-only');
-    return;
-  }
+function getSession() {
   try {
-    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    supabase.auth.onAuthStateChange((event, session) => {
-      supabaseUser = session?.user ?? null;
-      updateAuthUI();
-      if (supabaseUser && navigator.onLine) {
-        loadFromSupabase();
-      }
-    });
-  } catch(e) {
-    console.warn('Supabase init failed', e);
-  }
+    const s = localStorage.getItem(SESSION_KEY);
+    if (s) {
+      const d = JSON.parse(s);
+      if (d.expires_at > Date.now()) return d;
+    }
+  } catch(e) {}
+  return null;
 }
 
-// Load Supabase SDK without blocking page render
-const sdkScript = document.createElement('script');
-sdkScript.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
-sdkScript.onload = initSupabase;
-sdkScript.onerror = () => console.warn('Supabase CDN unavailable — local-only');
-document.head.appendChild(sdkScript);
+function setSession(token, user, expiresIn) {
+  const session = { token, user, expires_at: Date.now() + expiresIn * 1000 };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  supabaseToken = token;
+  supabaseUser = user;
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+  supabaseToken = null;
+  supabaseUser = null;
+}
+
+function authHeaders() {
+  const h = { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
+  if (supabaseToken) h['Authorization'] = 'Bearer ' + supabaseToken;
+  return h;
+}
+
+async function supabaseFetch(path, opts = {}) {
+  const r = await fetch(SUPABASE_URL + path, { ...opts, headers: { ...authHeaders(), ...opts.headers } });
+  if (!r.ok) {
+    const body = await r.text();
+    let msg = 'Request failed';
+    try { const j = JSON.parse(body); msg = j.msg || j.error || j.message || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+  return r;
+}
 
 async function signUp(email, password) {
-  if (!supabase) throw new Error('Cloud sync not available');
-  const { data, error } = await supabase.auth.signUp({ email, password });
-  if (error) throw error;
-  return data;
+  const r = await supabaseFetch('/auth/v1/signup', {
+    method: 'POST', body: JSON.stringify({ email, password })
+  });
+  const d = await r.json();
+  if (d.access_token) {
+    setSession(d.access_token, d.user, d.expires_in);
+    updateAuthUI();
+    loadFromSupabase();
+  }
+  return d;
 }
 
 async function signIn(email, password) {
-  if (!supabase) throw new Error('Cloud sync not available');
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
-  return data;
+  const r = await supabaseFetch('/auth/v1/token?grant_type=password', {
+    method: 'POST', body: JSON.stringify({ email, password })
+  });
+  const d = await r.json();
+  setSession(d.access_token, d.user, d.expires_in);
+  updateAuthUI();
+  loadFromSupabase();
+  return d;
 }
 
 async function signOut() {
-  if (!supabase) return;
-  await supabase.auth.signOut();
-  supabaseUser = null;
+  try { await supabaseFetch('/auth/v1/logout', { method: 'POST' }); } catch(e) {}
+  clearSession();
   updateAuthUI();
 }
 
@@ -496,13 +521,10 @@ function updateAuthUI() {
 }
 
 async function loadFromSupabase() {
-  if (!supabaseUser || !navigator.onLine) return;
+  if (!supabaseUser || !navigator.onLine || !supabaseToken) return;
   try {
-    const { data, error } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('user_id', supabaseUser.id);
-    if (error) throw error;
+    const r = await supabaseFetch('/rest/v1/trades?user_id=eq.' + supabaseUser.id + '&select=*');
+    const data = await r.json();
     if (data && data.length > 0) {
       trades = data.map(t => ({
         id: t.id, date: t.date, pair: t.pair, direction: t.direction,
@@ -523,10 +545,12 @@ async function loadFromSupabase() {
 }
 
 async function syncToSupabase() {
-  if (!supabaseUser || !navigator.onLine) return;
+  if (!supabaseUser || !navigator.onLine || !supabaseToken) return;
   try {
-    const { error } = await supabase.from('trades').upsert(
-      trades.map(t => ({
+    const r = await supabaseFetch('/rest/v1/trades', {
+      method: 'POST',
+      headers: { 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify(trades.map(t => ({
         id: t.id, user_id: supabaseUser.id,
         date: t.date, pair: t.pair, direction: t.direction,
         lot_size: t.lotSize, entry: t.entry, sl: t.sl,
@@ -536,10 +560,9 @@ async function syncToSupabase() {
         pnl: t.pnl, rr: t.rr, notes: t.notes,
         practice: t.practice, reflection: t.reflection,
         updated_at: new Date().toISOString()
-      })),
-      { onConflict: 'id' }
-    );
-    if (error) throw error;
+      })))
+    });
+    if (!r.ok) throw new Error('Sync failed');
   } catch(e) {
     console.warn('Cloud sync failed', e);
   }
@@ -1212,7 +1235,10 @@ document.getElementById('newsHeader').addEventListener('click', () => {
 });
 
 // INIT
+const saved = getSession();
+if (saved) { supabaseToken = saved.token; supabaseUser = saved.user; }
 updateAuthUI();
+if (supabaseUser && navigator.onLine) { loadFromSupabase(); }
 loadTrades();
 fetchRates().then(r => { if (r) render(); });
 render();
@@ -1234,7 +1260,6 @@ document.getElementById('authSignInBtn').addEventListener('click', async () => {
   const errEl = document.getElementById('authError');
   errEl.classList.add('hidden');
   errEl.style.color = 'var(--red)';
-  if (!supabase) { errEl.textContent = '❌ Supabase SDK not loaded — check your internet connection'; errEl.classList.remove('hidden'); return; }
   if (!email || !password) { errEl.textContent = 'Enter email and password'; errEl.classList.remove('hidden'); return; }
   try {
     await signIn(email, password);
@@ -1253,7 +1278,6 @@ document.getElementById('authSignUpBtn').addEventListener('click', async () => {
   const errEl = document.getElementById('authError');
   errEl.classList.add('hidden');
   errEl.style.color = 'var(--red)';
-  if (!supabase) { errEl.textContent = '❌ Supabase SDK not loaded — check your internet connection'; errEl.classList.remove('hidden'); return; }
   if (!email || !password) { errEl.textContent = 'Enter email and password'; errEl.classList.remove('hidden'); return; }
   if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; errEl.classList.remove('hidden'); return; }
   try {
