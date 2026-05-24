@@ -319,9 +319,19 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
       </select>
     </div>
     <div>
-      <label>Lot Size</label>
-      <input type="number" id="lotInput" step="0.01" min="0.01" value="0.10">
+      <label>Entry Type</label>
+      <select id="entryTypeSelect">
+        <option value="direct">Direct Entry</option>
+        <option value="buy_limit">Buy Limit</option>
+        <option value="sell_limit">Sell Limit</option>
+        <option value="buy_stop">Buy Stop</option>
+        <option value="sell_stop">Sell Stop</option>
+      </select>
     </div>
+  </div>
+  <div class="mb">
+    <label>Lot Size</label>
+    <input type="number" id="lotInput" step="0.01" min="0.01" value="0.10">
   </div>
 
   <!-- Step 2: Checklist (forex or gold) -->
@@ -499,6 +509,7 @@ async function loadFromSupabase() {
         lotSize: t.lot_size, entry: t.entry, sl: t.sl,
         tp1: t.tp1, tp2: t.tp2, tp3: t.tp3,
         exit: t.exit_price, exitPrice: t.exit_price, exitResult: t.exit_result,
+        entryType: t.entry_type || 'direct',
         pnl: t.pnl, rr: t.rr, notes: t.notes, practice: t.practice,
         reflection: t.reflection,
         createdAt: new Date(t.created_at).getTime()
@@ -521,6 +532,7 @@ async function syncToSupabase() {
         lot_size: t.lotSize, entry: t.entry, sl: t.sl,
         tp1: t.tp1, tp2: t.tp2, tp3: t.tp3,
         exit_price: t.exit, exit_result: t.exitResult,
+        entry_type: t.entryType || 'direct',
         pnl: t.pnl, rr: t.rr, notes: t.notes,
         practice: t.practice, reflection: t.reflection,
         updated_at: new Date().toISOString()
@@ -818,7 +830,7 @@ function renderActiveTrades() {
       <div>
         <span class="trade-dir" style="color:${t.direction==='BUY'?'var(--green)':'var(--red)'}">${t.direction}</span>
         ${t.pair} · ${t.lotSize}
-        <div style="font-size:11px;color:var(--muted)">E:${t.entry} SL:${t.sl} RR:${rr.toFixed(1)}</div>
+         <div style="font-size:11px;color:var(--muted)">${t.entryType||'direct'} · E:${t.entry} SL:${t.sl} RR:${rr.toFixed(1)}</div>
       </div>
       <button class="btn btn-outline btn-sm close-trade-btn" data-id="${t.id}" style="width:auto">Close</button>
     </div>`;
@@ -872,7 +884,7 @@ function renderHistory() {
         <span class="trade-dir" style="color:${t.direction==='BUY'?'var(--green)':'var(--red)'}">${t.direction}</span>
         ${t.pair} · ${t.date.slice(5)}${pracBadge}
         <div style="font-size:11px;color:var(--muted)">
-          E:${t.entry} SL:${t.sl}${t.exit ? ' X:'+t.exit : ''}${exitInfo}
+           ${t.entryType||'direct'} · E:${t.entry} SL:${t.sl}${t.exit ? ' X:'+t.exit : ''}${exitInfo}
           ${t.notes ? ' · "'+t.notes+'"' : ''}${refText}
         </div>
       </div>
@@ -1016,10 +1028,12 @@ document.getElementById('saveTradeBtn').addEventListener('click', () => {
   const rr = Math.abs(tp1 - entry) / Math.abs(entry - sl);
   if (rr < 1.5) { document.getElementById('saveError').textContent = 'RR must be ≥ 1.5:1'; document.getElementById('saveError').classList.remove('hidden'); return; }
 
+  const entryType = document.getElementById('entryTypeSelect').value;
   const trade = {
     id: genId(),
     date: today(),
     pair, direction, lotSize, entry, sl, tp1, tp2, tp3,
+    entryType,
     exit: null, exitPrice: null, exitResult: null,
     notes, practice, checklistDone: true,
     createdAt: Date.now()
@@ -1104,12 +1118,12 @@ document.getElementById('incMaxLossBtn').addEventListener('click', () => {
 
 // CSV export
 document.getElementById('exportCsvBtn').addEventListener('click', () => {
-  const rows = [['Date','Pair','Direction','Entry','SL','TP1','TP2','TP3','Exit','Result','P&L','RR','Practice','Notes','Reflection']];
+  const rows = [['Date','Pair','Direction','Type','Entry','SL','TP1','TP2','TP3','Exit','Result','P&L','RR','Practice','Notes','Reflection']];
   trades.sort((a,b) => a.createdAt - b.createdAt).forEach(t => {
     const pnl = t.exit !== undefined && t.exit !== null ? computePnl(t).toFixed(2) : '';
     const rr = computeRR(t);
     rows.push([
-      t.date, t.pair, t.direction, t.entry, t.sl,
+      t.date, t.pair, t.direction, t.entryType || 'direct', t.entry, t.sl,
       t.tp1 || '', t.tp2 || '', t.tp3 || '',
       t.exit || '', t.exitResult || '', pnl, rr > 0 ? rr.toFixed(2) : '',
       t.practice ? 'Yes' : '', t.notes || '', t.reflection || ''
