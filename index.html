@@ -456,7 +456,7 @@ function initSupabase() {
 
 // Load Supabase SDK without blocking page render
 const sdkScript = document.createElement('script');
-sdkScript.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+sdkScript.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js';
 sdkScript.onload = initSupabase;
 sdkScript.onerror = () => console.warn('Supabase CDN unavailable — local-only');
 document.head.appendChild(sdkScript);
