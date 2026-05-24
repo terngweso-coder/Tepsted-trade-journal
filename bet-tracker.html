@@ -107,8 +107,10 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 }
 .text-center { text-align: center; }
 .warn { color: var(--orange); font-size: 12px; }
-.leg-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 6px; align-items: end; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.leg-row { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
 .leg-row .btn { height: 34px; padding: 0 8px; }
+.leg-top { display: grid; grid-template-columns: 1fr auto; gap: 6px; align-items: end; margin-bottom: 4px; }
+.leg-bottom { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 6px; align-items: end; }
 .upcoming-game {
   padding: 10px 0; border-bottom: 1px solid var(--border);
 }
@@ -315,6 +317,12 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
     </select>
   </div>
 
+  <div class="mb">
+    <label>Bet Slip Name (optional)</label>
+    <input type="text" id="betNameInput" placeholder="e.g. Saturday Acca, Jackpot Hunt">
+  </div>
+
+  <datalist id="leagueLegList"></datalist>
   <div id="legsSection">
     <div class="flex between mb">
       <label>Selections (Legs)</label>
@@ -585,7 +593,7 @@ async function loadFromSupabase() {
         id: t.id, date: t.date, type: t.bet_type, legs: t.legs || [],
         stake: t.stake, totalOdds: t.total_odds, outcome: t.outcome,
         return: t.return_amt, pnl: t.pnl, notes: t.notes, practice: t.practice,
-        reflection: t.reflection, league: t.league,
+        reflection: t.reflection, league: t.league, name: t.name || '',
         createdAt: new Date(t.created_at).getTime()
       }));
       saveTrades(); render();
@@ -603,7 +611,7 @@ async function syncToSupabase() {
         stake: t.stake, total_odds: t.totalOdds, outcome: t.outcome,
         return_amt: t.return || 0, pnl: t.pnl || 0, notes: t.notes || '',
         practice: t.practice || false, reflection: t.reflection || '',
-        league: t.league || '',
+        league: t.league || '', name: t.name || '',
         updated_at: new Date().toISOString()
       })))
     });
@@ -976,12 +984,20 @@ function renderActiveBets() {
   if (active.length === 0) { section.classList.add('hidden'); return; }
   section.classList.remove('hidden');
   list.innerHTML = active.map(b => {
-    const legsText = b.legs && b.legs.length > 0 ? b.legs.map(l => l.match).join(', ') : (b.league || '—');
+    const nameTag = b.name ? `<span style="font-size:11px;font-weight:600;color:var(--orange)">${b.name}</span> · ` : '';
+    const legsText = b.legs && b.legs.length > 0
+      ? b.legs.map(l => {
+          const lg = l.league ? l.league + ' ' : '';
+          const tm = l.time ? l.time.slice(0,5) + ' ' : '';
+          return lg + tm + l.match;
+        }).join('<br>')
+      : (b.league || '—');
     const odds = b.totalOdds || computeTotalOdds(b.legs);
     return `<div class="bet-row">
       <div>
         <span class="tag ${b.type === 'single' ? 'green' : (b.type === 'multi' ? 'orange' : 'gray')}" style="font-size:9px">${b.type}</span>
-        ${legsText}
+        ${nameTag}${b.legs ? b.legs.length + ' legs' : '1 leg'}
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${legsText}</div>
         <div style="font-size:11px;color:var(--muted)">@${odds.toFixed(2)} · $${b.stake}</div>
       </div>
       <button class="btn btn-outline btn-sm settle-bet-btn" data-id="${b.id}" style="width:auto">Settle</button>
@@ -1042,12 +1058,17 @@ function renderHistory() {
     const pnlCls = pnl !== null ? (pnl >= 0 ? 'pnl-pos' : 'pnl-neg') : '';
     const pracBadge = b.practice ? ' <span class="tag gray" style="font-size:10px">PRACTICE</span>' : '';
     const typeLabel = b.type === 'single' ? 'S' : (b.type === 'multi' ? 'M' : 'J');
-    const legInfo = b.legs && b.legs.length > 0 ? b.legs.map(l => l.match + ' ' + l.pick + '@' + l.odds).join('; ') : '';
+    const nameTag = b.name ? ` <span style="font-size:11px;color:var(--orange);font-weight:600">${b.name}</span>` : '';
+    const legInfo = b.legs && b.legs.length > 0 ? b.legs.map(l => {
+      const lg = l.league ? l.league + ' ' : '';
+      const tm = l.time ? l.time.slice(0,5) + ' ' : '';
+      return lg + tm + l.match + ' ' + l.pick + '@' + l.odds;
+    }).join('; ') : '';
     const refText = b.reflection ? ` 💭 "${b.reflection}"` : '';
     return `<div class="bet-row">
       <div>
         <span class="tag ${b.type==='single'?'green':(b.type==='multi'?'orange':'gray')}" style="font-size:9px">${typeLabel}</span>
-        ${b.league || ''} · ${b.date.slice(5)}${pracBadge}
+        ${nameTag}${b.league || ''} · ${b.date.slice(5)}${pracBadge}
         <div style="font-size:11px;color:var(--muted)">
           ${legInfo || (b.league || '')}
           ${b.notes ? ' · "'+b.notes+'"' : ''}${refText}
@@ -1074,6 +1095,12 @@ document.getElementById('newBetBtn').addEventListener('click', () => openBetModa
 document.getElementById('closeModalBtn').addEventListener('click', () => document.getElementById('betModal').classList.add('hidden'));
 
 function openBetModal() {
+  // Populate league datalist
+  const leagues = new Set(DEFAULT_LEAGUES);
+  bets.forEach(b => { if (b.league) leagues.add(b.league); });
+  upcomingGames.forEach(g => { if (g.league) leagues.add(g.league); });
+  document.getElementById('leagueLegList').innerHTML = [...leagues].sort().map(l => '<option value="' + l.replace(/"/g,'&quot;') + '">').join('');
+  document.getElementById('betNameInput').value = '';
   document.getElementById('betModal').classList.remove('hidden');
   resetLegs();
   resetChecklist();
@@ -1099,30 +1126,40 @@ function resetLegs() {
 
 function renderLegRow(idx) {
   return `<div class="leg-row" data-idx="${idx}">
-    <div>
-      <label>Match</label>
-      <input type="text" class="leg-match" placeholder="Team A vs Team B" style="font-size:12px">
+    <div class="leg-top">
+      <div>
+        <label>Match</label>
+        <input type="text" class="leg-match" placeholder="Team A vs Team B" style="font-size:12px">
+      </div>
+      ${idx > 0 ? `<button class="btn btn-outline btn-sm remove-leg-btn" data-idx="${idx}" style="width:auto;padding:4px 8px;font-size:11px">✕</button>` : '<div></div>'}
     </div>
-    <div>
-      <label>Pick</label>
-      <select class="leg-pick" style="font-size:12px;padding:6px">
-        <option value="1">Home (1)</option>
-        <option value="X">Draw (X)</option>
-        <option value="2">Away (2)</option>
-        <option value="over2.5">Over 2.5</option>
-        <option value="under2.5">Under 2.5</option>
-        <option value="btts_yes">BTTS Yes</option>
-        <option value="btts_no">BTTS No</option>
-        <option value="dc1x">DC 1X</option>
-        <option value="dc12">DC 12</option>
-        <option value="dcx2">DC X2</option>
-      </select>
-    </div>
-    <div>
-      <label>Odds</label>
-      <div class="flex gap">
+    <div class="leg-bottom">
+      <div>
+        <label>League</label>
+        <input type="text" class="leg-league" placeholder="e.g. EPL" style="font-size:12px" list="leagueLegList">
+      </div>
+      <div>
+        <label>Time</label>
+        <input type="time" class="leg-time" style="font-size:12px">
+      </div>
+      <div>
+        <label>Pick</label>
+        <select class="leg-pick" style="font-size:12px;padding:6px">
+          <option value="1">Home (1)</option>
+          <option value="X">Draw (X)</option>
+          <option value="2">Away (2)</option>
+          <option value="over2.5">Over 2.5</option>
+          <option value="under2.5">Under 2.5</option>
+          <option value="btts_yes">BTTS Yes</option>
+          <option value="btts_no">BTTS No</option>
+          <option value="dc1x">DC 1X</option>
+          <option value="dc12">DC 12</option>
+          <option value="dcx2">DC X2</option>
+        </select>
+      </div>
+      <div>
+        <label>Odds</label>
         <input type="number" class="leg-odds" step="0.01" min="1.01" value="2.00" style="font-size:12px">
-        ${idx > 0 ? `<button class="btn btn-outline btn-sm remove-leg-btn" data-idx="${idx}" style="width:auto;padding:4px 8px;font-size:11px">✕</button>` : ''}
       </div>
     </div>
   </div>`;
@@ -1199,10 +1236,13 @@ document.getElementById('saveBetBtn').addEventListener('click', () => {
   const stake = parseFloat(document.getElementById('stakeInput').value) || 0;
   const notes = document.getElementById('notesInput').value.trim();
   const practice = document.getElementById('practiceCheck').checked;
+  const betName = document.getElementById('betNameInput').value.trim();
 
   const matchInputs = document.querySelectorAll('.leg-match');
   const pickInputs = document.querySelectorAll('.leg-pick');
   const oddsInputs = document.querySelectorAll('.leg-odds');
+  const leagueInputs = document.querySelectorAll('.leg-league');
+  const timeInputs = document.querySelectorAll('.leg-time');
   const legs = [];
   let firstLeague = '';
 
@@ -1210,9 +1250,11 @@ document.getElementById('saveBetBtn').addEventListener('click', () => {
     const match = matchInputs[i].value.trim();
     const pick = pickInputs[i].value;
     const odds = parseFloat(oddsInputs[i].value) || 1;
+    const league = leagueInputs[i].value.trim();
+    const time = timeInputs[i].value;
     if (!match) { document.getElementById('saveError').textContent = 'Enter match for leg ' + (i+1); document.getElementById('saveError').classList.remove('hidden'); return; }
-    legs.push({ match, pick, odds });
-    if (i === 0) { const m = match.match(/vs/i); /* guess league from match? leave blank for now */ }
+    legs.push({ match, pick, odds, league, time });
+    if (i === 0) firstLeague = league;
   }
 
   if (stake <= 0) { document.getElementById('saveError').textContent = 'Enter a stake amount'; document.getElementById('saveError').classList.remove('hidden'); return; }
@@ -1226,7 +1268,8 @@ document.getElementById('saveBetBtn').addEventListener('click', () => {
     type, legs, stake, totalOdds,
     outcome: null, return: null, pnl: null,
     notes, practice, reflection: '',
-    league: '',
+    name: betName,
+    league: firstLeague,
     createdAt: Date.now()
   };
   bets.push(bet);
@@ -1243,11 +1286,16 @@ function openSettleModal(id) {
   const b = bets.find(t => t.id === id);
   if (!b) return;
   document.getElementById('settleModal').classList.remove('hidden');
+  const nameTag = b.name ? ` <span style="color:var(--orange)">${b.name}</span>` : '';
   const legsHtml = b.legs && b.legs.length > 0
-    ? b.legs.map(l => `<div style="font-size:12px;padding:3px 0">${l.match} — ${l.pick} @ ${l.odds}</div>`).join('')
+    ? b.legs.map(l => {
+        const lg = l.league ? l.league + ' ' : '';
+        const tm = l.time ? l.time.slice(0,5) + ' ' : '';
+        return `<div style="font-size:12px;padding:3px 0">${lg}${tm}${l.match} — ${l.pick} @ ${l.odds}</div>`;
+      }).join('')
     : '<div style="font-size:12px;color:var(--muted)">No leg details</div>';
   document.getElementById('settleBetInfo').innerHTML =
-    `<b>${b.type}</b> · ${b.legs ? b.legs.length + ' legs' : '1 leg'} · $${b.stake} stake @ ${(b.totalOdds || 1).toFixed(2)}`;
+    `<b>${b.type}</b>${nameTag} · ${b.legs ? b.legs.length + ' legs' : '1 leg'} · $${b.stake} stake @ ${(b.totalOdds || 1).toFixed(2)}`;
   document.getElementById('settleLegsContainer').innerHTML = legsHtml;
   document.getElementById('outcomeSelect').value = 'won';
 }
@@ -1308,11 +1356,15 @@ document.getElementById('forgiveBtn').addEventListener('click', () => { setCoold
 
 // CSV export
 document.getElementById('exportCsvBtn').addEventListener('click', () => {
-  const rows = [['Date','Type','Legs','Stake','Total Odds','Outcome','Return','P&L','Practice','Notes','Reflection']];
+  const rows = [['Date','Name','Type','Legs (League/Time/Match/Pick/Odds)','Stake','Total Odds','Outcome','Return','P&L','Practice','Notes','Reflection']];
   bets.sort((a,b) => a.createdAt - b.createdAt).forEach(b => {
     const pnl = b.outcome && b.outcome !== 'pending' ? computePnl(b).toFixed(2) : '';
-    const legStr = b.legs ? b.legs.map(l => l.match + ' ' + l.pick + '@' + l.odds).join(' / ') : '';
-    rows.push([b.date, b.type, legStr, b.stake, (b.totalOdds || 1).toFixed(2),
+    const legStr = b.legs ? b.legs.map(l => {
+      const lg = l.league || '';
+      const tm = l.time ? l.time.slice(0,5) : '';
+      return [lg, tm, l.match, l.pick + '@' + l.odds].filter(Boolean).join(' ');
+    }).join(' / ') : '';
+    rows.push([b.date, b.name || '', b.type, legStr, b.stake, (b.totalOdds || 1).toFixed(2),
       b.outcome || 'pending', b.return || '', pnl,
       b.practice ? 'Yes' : '', b.notes || '', b.reflection || ''
     ]);
