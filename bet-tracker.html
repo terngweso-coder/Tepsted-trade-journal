@@ -109,6 +109,27 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 .warn { color: var(--orange); font-size: 12px; }
 .leg-row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 6px; align-items: end; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
 .leg-row .btn { height: 34px; padding: 0 8px; }
+.upcoming-game {
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.upcoming-game:last-child { border-bottom: none; }
+.game-teams { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.game-meta { font-size: 11px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.game-meta .tag { font-size: 9px; }
+.game-picks { font-size: 12px; padding: 4px 0; }
+.countdown { font-size: 11px; font-weight: 600; }
+.countdown.live { color: var(--green); }
+.countdown.soon { color: var(--orange); }
+.countdown.past { color: var(--red); }
+.paid-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+.paid-badge.paid { background: #1a3a28; color: var(--green); }
+.paid-badge.unpaid { background: #3a1a1a; color: var(--red); }
+.admin-toggle {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--muted); cursor: pointer;
+  padding: 6px 0; user-select: none;
+}
+.admin-toggle input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
 @keyframes slidein { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .anim-in { animation: slidein .2s ease; }
 </style>
@@ -187,6 +208,25 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
   <div class="card">
     <h3>🟡 Active Bets</h3>
     <div id="activeBetsList"></div>
+  </div>
+</div>
+
+<!-- Upcoming Games -->
+<div class="card">
+  <div class="flex between mb" id="upcomingHeader" style="cursor:pointer">
+    <h3>📅 Upcoming Games</h3>
+    <span style="display:flex;gap:6px;align-items:center">
+      <span id="upcomingCount" class="stat-label" style="font-size:11px">0 games</span>
+      <span id="upcomingToggle" style="font-size:12px;color:var(--muted)">▼</span>
+    </span>
+  </div>
+  <div id="upcomingBody">
+    <div class="admin-toggle">
+      <input type="checkbox" id="showPicksCheck">
+      <label for="showPicksCheck" style="cursor:pointer;margin:0">Show picks to everyone</label>
+    </div>
+    <div id="upcomingList"><div class="empty">No upcoming games added yet</div></div>
+    <button class="btn btn-outline btn-sm mt" id="addGameBtn" style="width:100%;font-size:12px">➕ Add Game</button>
   </div>
 </div>
 
@@ -346,6 +386,62 @@ input:focus, select:focus { outline: none; border-color: var(--blue); }
 </div>
 </div>
 
+<!-- ========= MODAL: Add/Edit Game ========= -->
+<div id="gameModal" class="modal-overlay hidden">
+<div class="modal anim-in">
+  <div class="flex between mb">
+    <h3><span id="gameModalTitle">➕ Add Upcoming Game</span></h3>
+    <button class="btn btn-outline btn-sm" id="closeGameModalBtn" style="width:auto">✕</button>
+  </div>
+  <div class="mb">
+    <label>League</label>
+    <input type="text" id="gameLeagueInput" placeholder="e.g. English Premier League" list="leagueList">
+    <datalist id="leagueList"></datalist>
+  </div>
+  <div class="row2 mb">
+    <div>
+      <label>Home Team</label>
+      <input type="text" id="gameHomeInput" placeholder="e.g. Arsenal">
+    </div>
+    <div>
+      <label>Away Team</label>
+      <input type="text" id="gameAwayInput" placeholder="e.g. Chelsea">
+    </div>
+  </div>
+  <div class="row2 mb">
+    <div>
+      <label>Date</label>
+      <input type="date" id="gameDateInput">
+    </div>
+    <div>
+      <label>Time</label>
+      <input type="time" id="gameTimeInput">
+    </div>
+  </div>
+  <div class="mb">
+    <label>Your Pick (optional — hidden until you show picks)</label>
+    <select id="gamePickSelect">
+      <option value="">— No pick yet —</option>
+      <option value="1">Home (1)</option>
+      <option value="X">Draw (X)</option>
+      <option value="2">Away (2)</option>
+      <option value="over2.5">Over 2.5</option>
+      <option value="under2.5">Under 2.5</option>
+      <option value="btts_yes">BTTS Yes</option>
+      <option value="btts_no">BTTS No</option>
+    </select>
+  </div>
+  <div class="mb">
+    <div class="flex gap" style="align-items:center;font-size:12px">
+      <input type="checkbox" id="gamePaidCheck" style="width:18px;height:18px;cursor:pointer">
+      <label for="gamePaidCheck" style="cursor:pointer;margin:0;color:var(--green)">💰 Mark as paid</label>
+    </div>
+  </div>
+  <div id="gameError" class="warn mb hidden text-center"></div>
+  <button class="btn btn-green" id="saveGameBtn">✅ Save Game</button>
+</div>
+</div>
+
 <!-- ========= MODAL: Auth ========= -->
 <div id="authModal" class="modal-overlay hidden">
 <div class="modal anim-in">
@@ -390,6 +486,9 @@ const DEFAULT_LEAGUES = ['English Premier League', 'La Liga', 'Serie A', 'Bundes
 const BET_TYPES = ['single', 'multi', 'jackpot'];
 
 let bets = [];
+let upcomingGames = [];
+const UPCOMING_KEY = 'bt_upcoming';
+const SHOW_PICKS_KEY = 'bt_show_picks';
 
 // === SUPABASE (direct fetch — no CDN) ===
 const SUPABASE_URL = 'https://omxgtrsmpgvmqccmpadr.supabase.co';
@@ -435,6 +534,8 @@ async function signUp(email, password) {
     updateAuthUI();
     await loadFromSupabase();
     syncToSupabase();
+    await loadUpcomingFromSupabase();
+    syncUpcomingToSupabase();
   }
   return d;
 }
@@ -445,6 +546,8 @@ async function signIn(email, password) {
   updateAuthUI();
   await loadFromSupabase();
   syncToSupabase();
+  await loadUpcomingFromSupabase();
+  syncUpcomingToSupabase();
   return d;
 }
 async function signOut() {
@@ -505,6 +608,54 @@ async function syncToSupabase() {
       })))
     });
   } catch(e) { console.warn('Cloud sync failed', e); }
+}
+
+// === UPCOMING GAMES SUPABASE ===
+async function loadUpcomingFromSupabase() {
+  if (!supabaseUser || !supabaseToken) return;
+  try {
+    const r = await supabaseFetch('/rest/v1/upcoming_games?user_id=eq.' + supabaseUser.id + '&select=*');
+    const data = await r.json();
+    if (data && data.length > 0) {
+      upcomingGames = data.map(g => ({
+        id: g.id, league: g.league || '',
+        homeTeam: g.home_team || '', awayTeam: g.away_team || '',
+        date: g.date || '', time: g.time || '',
+        picks: g.picks || '', paid: g.paid || false,
+        createdAt: new Date(g.created_at).getTime()
+      }));
+      saveUpcoming(); renderUpcomingGames();
+    }
+  } catch(e) { console.warn('Load upcoming from cloud failed', e); }
+}
+async function syncUpcomingToSupabase() {
+  if (!supabaseUser || !supabaseToken) return;
+  try {
+    await supabaseFetch('/rest/v1/upcoming_games', {
+      method: 'POST', headers: { 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify(upcomingGames.map(g => ({
+        id: g.id, user_id: supabaseUser.id,
+        league: g.league || '', home_team: g.homeTeam, away_team: g.awayTeam,
+        date: g.date, time: g.time,
+        picks: g.picks || '', paid: g.paid || false,
+        updated_at: new Date().toISOString()
+      })))
+    });
+  } catch(e) { console.warn('Cloud sync upcoming failed', e); }
+}
+function saveUpcoming() {
+  try { localStorage.setItem(UPCOMING_KEY, JSON.stringify(upcomingGames)); } catch(e) { console.warn('Save upcoming failed', e); }
+  if (supabaseUser && navigator.onLine) { syncUpcomingToSupabase(); }
+}
+function loadUpcoming() {
+  try { const r = localStorage.getItem(UPCOMING_KEY); if (r) upcomingGames = JSON.parse(r); } catch(e) { upcomingGames = []; }
+  if (!Array.isArray(upcomingGames)) upcomingGames = [];
+}
+function getShowPicks() {
+  try { return localStorage.getItem(SHOW_PICKS_KEY) === 'true'; } catch(e) { return false; }
+}
+function setShowPicks(v) {
+  try { localStorage.setItem(SHOW_PICKS_KEY, v ? 'true' : 'false'); } catch(e) {}
 }
 
 // === BET LOGIC ===
@@ -635,10 +786,146 @@ function dateInRange(dateStr, range) {
   return true;
 }
 
+// === UPCOMING GAMES RENDER ===
+function renderUpcomingGames() {
+  const list = document.getElementById('upcomingList');
+  const count = document.getElementById('upcomingCount');
+  const showPicks = getShowPicks();
+  document.getElementById('showPicksCheck').checked = showPicks;
+
+  if (upcomingGames.length === 0) {
+    list.innerHTML = '<div class="empty">No upcoming games added yet</div>';
+    count.textContent = '0 games';
+    return;
+  }
+
+  const now = new Date();
+  const sorted = [...upcomingGames].sort((a, b) => {
+    const da = new Date(a.date + 'T' + (a.time || '00:00'));
+    const db = new Date(b.date + 'T' + (b.time || '00:00'));
+    return da - db;
+  });
+
+  count.textContent = sorted.length + ' game' + (sorted.length !== 1 ? 's' : '');
+
+  list.innerHTML = sorted.map(g => {
+    const gameDate = new Date(g.date + 'T' + (g.time || '00:00'));
+    const diffMs = gameDate - now;
+    const diffMin = Math.round(diffMs / 60000);
+    let countdownStr = '', countdownCls = '';
+    if (diffMs < 0) {
+      countdownStr = '🔴 Started';
+      countdownCls = 'countdown past';
+    } else if (diffMin < 60) {
+      countdownStr = '🔴 ' + diffMin + 'm';
+      countdownCls = 'countdown live';
+    } else if (diffMin < 1440) {
+      const h = Math.floor(diffMin / 60);
+      const m = diffMin % 60;
+      countdownStr = '🟡 ' + h + 'h ' + m + 'm';
+      countdownCls = 'countdown soon';
+    } else {
+      const d = Math.floor(diffMin / 1440);
+      countdownStr = '⚪ ' + d + 'd';
+      countdownCls = 'countdown';
+    }
+
+    const paidBadge = g.paid
+      ? '<span class="paid-badge paid">💰 Paid</span>'
+      : '<span class="paid-badge unpaid">❌ Unpaid</span>';
+
+    const picksHtml = (showPicks && g.picks)
+      ? '<div class="game-picks">🎯 Pick: <b>' + g.picks + '</b></div>'
+      : (showPicks ? '<div class="game-picks" style="color:var(--muted)">🎯 No pick set yet</div>' : '');
+
+    const picksPreview = !showPicks && g.picks
+      ? '<div class="game-picks" style="color:var(--muted);font-style:italic">🔒 Pick hidden</div>'
+      : '';
+
+    const leagueTag = g.league
+      ? '<span class="tag gray" style="font-size:9px">' + g.league + '</span>'
+      : '';
+
+    const dateStr = gameDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeStr = g.time ? g.time.slice(0,5) : '—';
+
+    return `<div class="upcoming-game">
+      <div class="flex between" style="margin-bottom:2px">
+        <div class="game-teams">${g.homeTeam} vs ${g.awayTeam}</div>
+        <div class="flex gap" style="gap:4px">
+          <button class="btn btn-outline btn-sm edit-game-btn" data-id="${g.id}" style="width:auto;padding:2px 6px;font-size:10px">✎</button>
+          <button class="btn btn-outline btn-sm delete-game-btn" data-id="${g.id}" style="width:auto;padding:2px 6px;font-size:10px;color:var(--red)">✕</button>
+        </div>
+      </div>
+      <div class="game-meta">
+        ${leagueTag}
+        <span>📅 ${dateStr} · ${timeStr}</span>
+        <span class="${countdownCls}">${countdownStr}</span>
+        ${paidBadge}
+      </div>
+      ${picksHtml}
+      ${picksPreview}
+    </div>`;
+  }).join('');
+
+  document.querySelectorAll('.edit-game-btn').forEach(btn => {
+    btn.addEventListener('click', () => openGameModal(btn.dataset.id));
+  });
+  document.querySelectorAll('.delete-game-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (confirm('Delete this upcoming game?')) {
+        upcomingGames = upcomingGames.filter(g => g.id !== btn.dataset.id);
+        saveUpcoming();
+        renderUpcomingGames();
+      }
+    });
+  });
+}
+
+function openGameModal(id) {
+  // Populate league datalist
+  const leagues = new Set(DEFAULT_LEAGUES);
+  upcomingGames.forEach(g => { if (g.league) leagues.add(g.league); });
+  document.getElementById('leagueList').innerHTML = [...leagues].sort().map(l => '<option value="' + l.replace(/"/g,'&quot;') + '">').join('');
+
+  const modal = document.getElementById('gameModal');
+  modal.classList.remove('hidden');
+  const isEdit = !!id;
+  document.getElementById('gameModalTitle').textContent = isEdit ? '✏️ Edit Game' : '➕ Add Upcoming Game';
+
+  if (isEdit) {
+    const g = upcomingGames.find(x => x.id === id);
+    if (!g) return;
+    document.getElementById('gameLeagueInput').value = g.league || '';
+    document.getElementById('gameHomeInput').value = g.homeTeam || '';
+    document.getElementById('gameAwayInput').value = g.awayTeam || '';
+    document.getElementById('gameDateInput').value = g.date || '';
+    document.getElementById('gameTimeInput').value = g.time || '';
+    document.getElementById('gamePickSelect').value = g.picks || '';
+    document.getElementById('gamePaidCheck').checked = g.paid || false;
+    document.getElementById('saveGameBtn').dataset.editId = id;
+  } else {
+    document.getElementById('gameLeagueInput').value = '';
+    document.getElementById('gameHomeInput').value = '';
+    document.getElementById('gameAwayInput').value = '';
+    document.getElementById('gameDateInput').value = today();
+    document.getElementById('gameTimeInput').value = '20:00';
+    document.getElementById('gamePickSelect').value = '';
+    document.getElementById('gamePaidCheck').checked = false;
+    document.getElementById('saveGameBtn').dataset.editId = '';
+  }
+  document.getElementById('gameError').classList.add('hidden');
+}
+
+function closeGameModal() {
+  document.getElementById('gameModal').classList.add('hidden');
+}
+
 // === RENDER ===
 function render() {
   renderCounter();
   renderActiveBets();
+  renderUpcomingGames();
   renderStats();
   renderHistory();
   checkCooldown();
@@ -1039,6 +1326,48 @@ document.getElementById('exportCsvBtn').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// === UPCOMING GAME MODAL HANDLERS ===
+document.getElementById('addGameBtn').addEventListener('click', () => openGameModal());
+document.getElementById('closeGameModalBtn').addEventListener('click', closeGameModal);
+document.getElementById('saveGameBtn').addEventListener('click', () => {
+  const league = document.getElementById('gameLeagueInput').value.trim();
+  const homeTeam = document.getElementById('gameHomeInput').value.trim();
+  const awayTeam = document.getElementById('gameAwayInput').value.trim();
+  const date = document.getElementById('gameDateInput').value;
+  const time = document.getElementById('gameTimeInput').value;
+  const picks = document.getElementById('gamePickSelect').value;
+  const paid = document.getElementById('gamePaidCheck').checked;
+  const errEl = document.getElementById('gameError');
+  errEl.classList.add('hidden');
+
+  if (!homeTeam || !awayTeam) { errEl.textContent = 'Enter both home and away teams'; errEl.classList.remove('hidden'); return; }
+  if (!date) { errEl.textContent = 'Select a date'; errEl.classList.remove('hidden'); return; }
+
+  const editId = document.getElementById('saveGameBtn').dataset.editId;
+
+  if (editId) {
+    const g = upcomingGames.find(x => x.id === editId);
+    if (g) {
+      g.league = league; g.homeTeam = homeTeam; g.awayTeam = awayTeam;
+      g.date = date; g.time = time; g.picks = picks; g.paid = paid;
+    }
+  } else {
+    upcomingGames.push({
+      id: genId(), league, homeTeam, awayTeam, date, time, picks, paid,
+      createdAt: Date.now()
+    });
+  }
+
+  saveUpcoming();
+  closeGameModal();
+  renderUpcomingGames();
+});
+
+document.getElementById('showPicksCheck').addEventListener('change', () => {
+  setShowPicks(document.getElementById('showPicksCheck').checked);
+  renderUpcomingGames();
+});
+
 // Auth modal handlers
 document.getElementById('authSignInBtn').addEventListener('click', async () => {
   const email = document.getElementById('authEmail').value.trim();
@@ -1063,7 +1392,7 @@ document.getElementById('authSkipBtn').addEventListener('click', () => document.
 document.getElementById('authModal').addEventListener('click', e => { if (e.target === e.currentTarget) document.getElementById('authModal').classList.add('hidden'); });
 
 // Collapse toggles
-['today', 'stats', 'history'].forEach(prefix => {
+['today', 'stats', 'history', 'upcoming'].forEach(prefix => {
   const header = document.getElementById(prefix + 'Header');
   const body = document.getElementById(prefix + 'Body');
   const toggle = document.getElementById(prefix + 'Toggle');
@@ -1074,17 +1403,27 @@ document.getElementById('authModal').addEventListener('click', e => { if (e.targ
 // Modal overlay close
 document.getElementById('betModal').addEventListener('click', e => { if (e.target === e.currentTarget) document.getElementById('betModal').classList.add('hidden'); });
 document.getElementById('settleModal').addEventListener('click', e => { if (e.target === e.currentTarget) document.getElementById('settleModal').classList.add('hidden'); });
+document.getElementById('gameModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeGameModal(); });
 
 // INIT
 const saved = getSession();
 if (saved) { supabaseToken = saved.token; supabaseUser = saved.user; }
 updateAuthUI();
 loadTrades();
-if (supabaseUser && navigator.onLine) { loadFromSupabase().then(() => syncToSupabase()); }
+loadUpcoming();
+if (supabaseUser && navigator.onLine) {
+  Promise.all([
+    loadFromSupabase().then(() => syncToSupabase()),
+    loadUpcomingFromSupabase().then(() => syncUpcomingToSupabase())
+  ]).then(() => render());
+} else {
+  render();
+}
 fetchRates().then(r => { if (r) render(); });
-render();
+// Live countdown refresh every 30s
+setInterval(renderUpcomingGames, 30000);
 
-console.log('⚽ Bet Tracker loaded —', bets.length, 'bets');
+console.log('⚽ Bet Tracker loaded —', bets.length, 'bets,', upcomingGames.length, 'upcoming');
 </script>
 </body>
 </html>
