@@ -485,7 +485,8 @@ async function signUp(email, password) {
   if (d.access_token) {
     setSession(d.access_token, d.user, d.expires_in);
     updateAuthUI();
-    loadFromSupabase();
+    await loadFromSupabase();
+    syncToSupabase();
   }
   return d;
 }
@@ -497,7 +498,8 @@ async function signIn(email, password) {
   const d = await r.json();
   setSession(d.access_token, d.user, d.expires_in);
   updateAuthUI();
-  loadFromSupabase();
+  await loadFromSupabase();
+  syncToSupabase();
   return d;
 }
 
@@ -1238,8 +1240,8 @@ document.getElementById('newsHeader').addEventListener('click', () => {
 const saved = getSession();
 if (saved) { supabaseToken = saved.token; supabaseUser = saved.user; }
 updateAuthUI();
-if (supabaseUser && navigator.onLine) { loadFromSupabase(); }
 loadTrades();
+if (supabaseUser && navigator.onLine) { loadFromSupabase().then(() => syncToSupabase()); }
 fetchRates().then(r => { if (r) render(); });
 render();
 fetchCalendar();
